@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Длинные нарды</title>
+<style>
+:root{--bg:#f3ede2;--fg:#2a2118;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1d1812;--fg:#efe6d6}}
+:root[data-theme="dark"]{--bg:#1d1812;--fg:#efe6d6}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif}
+body{display:flex;flex-direction:column;-webkit-user-select:none;user-select:none}
+#stage{flex:1;min-height:0;position:relative}
+svg{position:absolute;display:block;touch-action:manipulation}
+#hud{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px}
+#txt{flex:1 1 200px;min-width:0}
+#msg{font-size:13px;line-height:1.25}
+#info{font-size:11px;opacity:.75}
+#dice{display:flex;gap:6px;min-height:44px;align-items:center}
+.d{width:44px;height:44px;box-sizing:border-box;border-radius:9px;background:#fffaf0;border:2px solid #8a6a3a;display:grid;grid-template:repeat(3,1fr)/repeat(3,1fr);padding:5px}
+.d.u{opacity:.35}
+.d i{width:8px;height:8px;border-radius:50%;background:#222;place-self:center}
+.x{font:700 16px system-ui}
+button{font:600 14px system-ui;padding:8px 12px;border-radius:10px;border:0;background:#8a5a2b;color:#fff}
+button.ic{background:#555;padding:8px 10px}
+button:disabled{opacity:.4}
+</style></head><body>
+<div id="stage"><svg id="b" viewBox="0 0 800 440"></svg></div>
+<div id="hud"><div id="txt"><div id="msg"></div><div id="info"></div></div><div id="dice"></div>
+<button id="roll">Бросить</button><button id="new" class="ic">Заново</button><button id="snd" class="ic">🔊</button><button id="rs" class="ic">0:0</button><button id="rot" class="ic">⟳</button><button id="fs" class="ic">⛶</button></div>
+<script>
+const $=id=>document.getElementById(id);
+const PW=48,BW=40,M=92,TY=10,BY=430,H=170,R=20;
+const OFF={1:0,'-1':12};
+let S;
+let score={1:0,'-1':0};
+try{const q=JSON.parse(localStorage.getItem('nardyScore'));if(q)score=q}catch(e){}
+const saveScore=()=>{try{localStorage.setItem('nardyScore',JSON.stringify(score))}catch(e){}};
+let ac,out,nb,mute=false;
+function A(){
+ if(!ac){ac=new (window.AudioContext||window.webkitAudioContext)();out=ac.createDynamicsCompressor();out.connect(ac.destination)}
+ if(ac.state==='suspended')ac.resume();
+}
+function noiseBuf(){
+ if(!nb){nb=ac.createBuffer(1,ac.sampleRate/2,ac.sampleRate);const d=nb.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1}
+ return nb;
+}
+function knock(t,vol,f){
+ const n=ac.createBufferSource();n.buffer=noiseBuf();
+ const bp=ac.createBiquadFilter();bp.type='bandpass';bp.frequency.value=f*(0.9+Math.random()*0.2);bp.Q.value=2.5;
+ const g=ac.createGain();g.gain.setValueAtTime(vol*0.9,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.05);
+ n.connect(bp).connect(g).connect(out);n.start(t);n.stop(t+0.08);
+ [[0.32,0.14,0.7],[0.62,0.07,0.35]].forEach(([r,len,a])=>{
+  const o=ac.createOscillator(),g2=ac.createGain();o.type='sine';
+  o.frequency.setValueAtTime(f*r,t);o.frequency.exponentialRampToValueAtTime(f*r*0.55,t+len);
+  g2.gain.setValueAtTime(vol*a,t);g2.gain.exponentialRampToValueAtTime(0.001,t+len);
+  o.connect(g2).connect(out);o.start(t);o.stop(t+len+0.02);
+ });
+}
+function sndMove(){
+ if(mute||!ac)return;
+ const t=ac.currentTime+0.01;
+ knock(t,1,1000+Math.random()*200);knock(t+0.075,0.3,1250);
+}
+function sndDice(){
+ if(mute||!ac)return;
+ const t=ac.currentTime+0.02;
+ const n=ac.createBufferSource();n.buffer=noiseBuf();
+ const lp=ac.createBiquadFilter();lp.type='lowpass';lp.frequency.value=700;
+ const g=ac.createGain();g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(0.18,t+0.05);g.gain.exponentialRampToValueAtTime(0.001,t+0.45);
+ n.connect(lp).connect(g).connect(out);n.start(t);n.stop(t+0.5);
+ for(let d=0;d<2;d++){
+  let tt=t+0.03+d*0.04+Math.random()*0.03,dt=0.13,v=0.9;
+  while(dt>0.03&&v>0.1){knock(tt,v*0.8,1700+Math.random()*700);tt+=dt;dt*=0.72;v*=0.72}
+ }
+}
+let rot=null;
+function fit(){
+ const st=$('stage'),w=st.clientWidth,h=st.clientHeight,sv=$('b');
+ const r=rot===null?(w<h):rot;
+ const s=r?Math.min(w/440,h/800):Math.min(w/800,h/440);
+ const W=800*s,Hh=440*s;
+ sv.style.width=W+'px';sv.style.height=Hh+'px';
+ sv.style.left=(w-W)/2+'px';sv.style.top=(h-Hh)/2+'px';
+ sv.style.transform=r?'rotate(90deg)':'none';
+}
+const px=k=>M+k*PW+(k>=6?BW:0);
+const slot=g=>g<12?{k:11-g,top:true}:{k:g-12,top:false};
+const relOf=(g,pl)=>(g-OFF[pl]+24)%24;
+const gOf=(r,pl)=>(r+OFF[pl])%24;
+const clone=s=>({p:s.p.slice(),off:{...s.off}});
+const hd=()=>({head:S.head,max:S.maxHead});
+function init(){
+ const p=Array(24).fill(0);p[0]=15;p[12]=-15;
+ S={p,off:{1:0,'-1':0},turn:1,dice:[],sel:null,over:false,rolled:false,busy:false,head:0,maxHead:1,first:{1:true,'-1':true}};
+ msg('Вы играете белыми, шашки идут против часовой стрелки. Бросьте кубики.');render();
+}
+function msg(t){$('msg').textContent=t}
+function allHome(st,pl){for(let g=0;g<24;g++)if(st.p[g]*pl>0&&relOf(g,pl)<18)return false;return true}
+function blocked6(st,pl){
+ const o=-pl;
+ for(let r=0;r<=18;r++){
+  let all=true;
+  for(let i=0;i<6;i++)if(st.p[gOf(r+i,pl)]*pl<=0){all=false;break}
+  if(!all||st.off[o]>0)continue;
+  const ro=relOf(gOf(r,pl),o);
+  if(ro+5<=23){let ahead=false;for(let g=0;g<24;g++)if(st.p[g]*o>0&&relOf(g,o)>ro+5){ahead=true;break}if(ahead)continue}
+  return true;
+ }
+ return false;
+}
+function runThrough(st,pl,from,tg){
+ const rt=relOf(tg,pl),rf=relOf(from,pl),vac=st.p[from]*pl===1;
+ const occ=r=>r>=0&&r<24&&(r===rt||(st.p[gOf(r,pl)]*pl>0&&!(vac&&r===rf)));
+ let a=rt,e=rt;
+ while(occ(a-1))a--;
+ while(occ(e+1))e++;
+ return e-a+1;
+}
+function apply(st,pl,m){st.p[m.from]-=pl;if(m.to==='off')st.off[pl]++;else st.p[m.to]+=pl}
+function legal(st,pl,n,h){
+ const r=[],home=allHome(st,pl);
+ for(let g=0;g<24;g++){
+  if(st.p[g]*pl<=0)continue;
+  const rl=relOf(g,pl),t=rl+n;
+  if(rl===0&&h.head>=h.max)continue;
+  if(t<24){
+   const tg=gOf(t,pl);
+   if(st.p[tg]*pl<0)continue;
+   if(runThrough(st,pl,g,tg)>=6){const c=clone(st);apply(c,pl,{from:g,to:tg});if(blocked6(c,pl))continue}
+   r.push({from:g,to:tg});
+  }else if(home){
+   const dist=24-rl;
+   if(n==dist)r.push({from:g,to:'off'});
+   else if(n>dist){
+    let far=false;
+    for(let j=0;j<24;j++)if(st.p[j]*pl>0&&24-relOf(j,pl)>dist){far=true;break}
+    if(!far)r.push({from:g,to:'off'});
+   }
+  }
+ }
+ return r;
+}
+function pips(st,pl){let s=0;for(let g=0;g<24;g++)if(st.p[g]*pl>0)s+=st.p[g]*pl*(24-relOf(g,pl));return s}
+const RUN=[0,0,1,4,10,22,45];let KK=14,BD=8,BN=24;
+function E(st,pl){
+ const o=-pl,p=st.p;
+ if(st.off[pl]===15)return 1e6+(st.off[o]===0?5e5:0);
+ if(st.off[o]===15)return -1e6-(st.off[pl]===0?5e5:0);
+ let pipO=0,pipP=0,rear=99,oc=0,s=0;
+ for(let g=0;g<24;g++){
+  const v=p[g];if(!v)continue;
+  if(v*pl>0)pipP+=v*pl*(24-relOf(g,pl));
+  else{const r=relOf(g,o);pipO+=-v*pl*(24-r);if(r<rear)rear=r;oc+=-v*pl}
+ }
+ let oppFree=0;
+ for(let g=0;g<24;g++){
+  const v=p[g];if(v*pl>=0)continue;
+  const c=-v*pl,r=relOf(g,o);let f=0;
+  for(let d=1;d<=6;d++){const t=r+d;if(t>=24||p[gOf(t,o)]*pl<=0)f++}
+  oppFree+=f;s-=f*Math.min(c,2)*0.9;
+  if(f===0)s+=7*Math.min(c,3)+(r===0?10:0);
+ }
+ if(oc&&oppFree===0)s+=25;
+ let pts=0,early=0,cont=0;
+ for(let g=0;g<24;g++){
+  const v=p[g];if(v*pl<=0)continue;
+  const c=v*pl,r=relOf(g,pl),orl=relOf(g,o);let f=0;
+  for(let d=1;d<=6;d++){const t=r+d;if(t>=24||p[gOf(t,pl)]*pl>=0)f++}
+  pts++;s+=f*0.3*Math.min(c,2);
+  if(f===0)s-=2.5*Math.min(c,2);
+  if(orl>rear){cont+=c;if(orl<=12)early++}
+  if(c>4&&r!==0)s-=0.5*(c-4);
+ }
+ s+=pts+early;
+ const head=p[OFF[pl]]*pl;if(head>0)s-=1.3*head;
+ let r=0;
+ while(r<24){
+  if(p[gOf(r,pl)]*pl>0){
+   const a=r;while(r<24&&p[gOf(r,pl)]*pl>0)r++;
+   s+=RUN[Math.min(r-a,6)]*(rear<relOf(gOf(a,pl),o)?1:0.1);
+  }else r++;
+ }
+ s+=(pipO-pipP)*(cont?0.5:1.2)+st.off[pl]*4+(st.off[o]===0?st.off[pl]*2:0)-st.off[o]*3;
+ return s;
+}
+function seqStates(st,pl,dice,maxHead,beam,evf){
+ let layer=[{st:clone(st),moves:[],head:0,dice:dice.slice()}],last=layer;
+ for(let depth=0;depth<dice.length;depth++){
+  const next=new Map();
+  for(const nd of layer)for(const n of new Set(nd.dice))for(const m of legal(nd.st,pl,n,{head:nd.head,max:maxHead})){
+   const c=clone(nd.st);apply(c,pl,m);
+   const hh=nd.head+(m.from===OFF[pl]?1:0),d=nd.dice.slice();d.splice(d.indexOf(n),1);
+   const key=c.p.join()+'|'+c.off[pl]+'|'+hh+'|'+d.join();
+   if(!next.has(key))next.set(key,{st:c,moves:nd.moves.concat({...m,n}),head:hh,dice:d});
+  }
+  if(!next.size)break;
+  layer=[...next.values()];
+  if(beam&&layer.length>beam&&depth<dice.length-1){layer.sort((x,y)=>evf(y.st)-evf(x.st));layer=layer.slice(0,beam)}
+  last=layer;
+ }
+ if(last[0].moves.length===1&&dice.length===2&&dice[0]!==dice[1]){
+  const hi=Math.max(...dice);
+  if(last.some(x=>x.moves[0].n===hi))last=last.filter(x=>x.moves[0].n===hi);
+ }
+ return last;
+}
+function expect(X,pl){
+ const o=-pl;let tot=0;
+ if(X.off[pl]===15)return E(X,pl);
+ const evo=s=>E(s,o);
+ for(let a=1;a<=6;a++)for(let c=a;c<=6;c++){
+  const pr=a==c?1/36:2/36,dice=a==c?[a,a,a,a]:[a,c];
+  const mh=(S.first[o]&&a==c&&[3,4,6].includes(a))?2:1;
+  let best=-Infinity;
+  for(const r of seqStates(X,o,dice,mh,a==c?BD:BN,evo)){const v=E(r.st,o);if(v>best)best=v}
+  tot+=pr*(-best);
+ }
+ return tot;
+}
+function aiPlan(pl){
+ const cand=seqStates(S,pl,S.dice,S.maxHead,0,null);
+ if(!cand.length||!cand[0].moves.length)return [];
+ for(const c of cand)c.v=E(c.st,pl);
+ cand.sort((x,y)=>y.v-x.v);
+ const t0=Date.now();let best=null;
+ for(let i=0;i<Math.min(KK,cand.length);i++){
+  const c=cand[i];c.f=expect(c.st,pl);
+  if(!best||c.f>best.f)best=c;
+  if(i>=1&&Date.now()-t0>2200)break;
+ }
+ return best.moves;
+}
+function playable(st,pl,dice,head,max,memo){
+ if(!dice.length)return 0;
+ const key=st.p.join()+'|'+st.off[pl]+'|'+dice.join()+'|'+head;
+ if(memo.has(key))return memo.get(key);
+ let best=0;
+ for(const n of new Set(dice)){
+  for(const m of legal(st,pl,n,{head,max})){
+   const c=clone(st);apply(c,pl,m);
+   const d=dice.slice();d.splice(d.indexOf(n),1);
+   const v=1+playable(c,pl,d,head+(m.from===OFF[pl]?1:0),max,memo);
+   if(v>best)best=v;
+   if(best===dice.length){memo.set(key,best);return best}
+  }
+ }
+ memo.set(key,best);return best;
+}
+let AC={k:'',res:[],total:0};
+function allowed(pl){
+ const k=pl+'|'+S.p.join()+'|'+S.off[1]+'|'+S.off[-1]+'|'+S.dice.join()+'|'+S.head+'|'+S.maxHead;
+ if(AC.k===k)return AC.res;
+ const h=hd(),memo=new Map();
+ let res=[];
+ const total=playable(S,pl,S.dice,h.head,h.max,memo);
+ if(total){
+  for(const n of new Set(S.dice))for(const m of legal(S,pl,n,h)){
+   const c=clone(S);apply(c,pl,m);
+   const d=S.dice.slice();d.splice(d.indexOf(n),1);
+   if(1+playable(c,pl,d,h.head+(m.from===OFF[pl]?1:0),h.max,memo)===total)res.push({...m,n});
+  }
+  if(total===1&&S.dice.length===2&&S.dice[0]!==S.dice[1]){
+   const hi=Math.max(...S.dice);
+   if(res.some(m=>m.n===hi))res=res.filter(m=>m.n===hi);
+  }
+ }
+ AC={k,res,total};return res;
+}
+const maxPlay=pl=>(allowed(pl),AC.total);
+const anyMoves=pl=>allowed(pl).length>0;
+function die(){const u=new Uint32Array(1);try{do{crypto.getRandomValues(u)}while(u[0]>=4294967292)}catch(e){return 1+Math.random()*6|0}return u[0]%6+1}
+function roll(){
+ if(S.rolled||S.over)return;
+ const a=die(),b=die();
+ S.dice=a==b?[a,a,a,a]:[a,b];S.roll=[a,b];S.rolled=true;S.sel=null;S.head=0;
+ S.maxHead=(S.first[S.turn]&&a==b&&[3,4,6].includes(a))?2:1;sndDice();
+ render();
+ if(!anyMoves(S.turn)){msg(S.turn==1?'Нет возможных ходов — ход переходит.':'У компьютера нет ходов.');setTimeout(endTurn,1300);return}
+ if(S.turn==-1){msg(`Компьютер бросил ${a}:${b}${a==b?' — дубль, четыре хода':''}…`);setTimeout(aiStep,700)}else msg((a==b?`Дубль ${a}:${a} — четыре хода по ${a}. `:`Выпало ${a}:${b}. `)+(maxPlay(1)<S.dice.length?`Можно сыграть ходов: ${maxPlay(1)}. `:'')+'Выберите шашку, затем зелёную клетку.');
+}
+function endTurn(){
+ S.first[S.turn]=false;S.plan=null;
+ S.turn=-S.turn;S.dice=[];S.rolled=false;S.sel=null;render();
+ if(S.turn==-1){S.busy=true;msg('Ход компьютера…');setTimeout(roll,700)}
+ else{S.busy=false;msg('Ваш ход. Бросьте кубики.')}
+}
+function checkWin(){
+ if(S.off[S.turn]==15){
+  const w=S.turn,mars=S.off[-w]===0;
+  score[w]+=mars?2:1;saveScore();S.over=true;
+  msg((w==1?'🎉 Вы победили! ':'Компьютер победил. ')+(mars?'Марс — 2 очка.':'Ойн — 1 очко.')+' Нажмите «Заново».');
+  render();return true}
+ return false;
+}
+function aiStep(){
+ if(!S.plan)S.plan=aiPlan(-1);
+ const m=S.plan.shift();
+ if(!m){S.plan=null;endTurn();return}
+ if(m.from===OFF[-1])S.head++;
+ apply(S,-1,m);sndMove();S.dice.splice(S.dice.indexOf(m.n),1);
+ render();if(checkWin()){S.plan=null;return}
+ setTimeout(aiStep,650);
+}
+function humanMove(m,n){
+ if(m.from===0)S.head++;
+ apply(S,1,m);sndMove();S.dice.splice(S.dice.indexOf(n),1);S.sel=null;
+ render();if(checkWin())return;
+ if(!S.dice.length||!anyMoves(1))setTimeout(endTurn,550);
+}
+function sources(){
+ const s=new Set();
+ if(S.turn!==1||!S.rolled)return s;
+ for(const m of allowed(1))s.add(m.from);
+ return s;
+}
+function targets(){
+ const t={};
+ if(S.sel===null||S.turn!==1)return t;
+ for(const m of allowed(1).slice().sort((a,b)=>a.n-b.n))if(m.from===S.sel&&!(m.to in t))t[m.to]={m,n:m.n};
+ return t;
+}
+function click(k){
+ if(S.turn!==1||!S.rolled||S.over)return;
+ const t=targets();
+ if(S.sel!==null&&t[k]!==undefined){humanMove(t[k].m,t[k].n);return}
+ const src=sources();
+ S.sel=(typeof k==='number'&&src.has(k)&&S.sel!==k)?k:null;
+ render();
+}
+const PIP=[[],[4],[0,8],[0,4,8],[0,2,6,8],[0,2,4,6,8],[0,2,3,5,6,8]];
+const face=(n,u)=>`<div class="d${u?' u':''}">${[0,1,2,3,4,5,6,7,8].map(i=>PIP[n].includes(i)?'<i></i>':'<b></b>').join('')}</div>`;
+function render(){
+ const t=targets(),src=sources();
+ let s=`<rect width="800" height="440" rx="10" fill="#6b3f1d"/><rect x="88" y="4" width="${12*PW+BW+8}" height="432" fill="#dcc79a"/>`;
+ s+=`<rect x="${px(6)-BW}" y="4" width="${BW}" height="432" fill="#7a4a22"/>`;
+ s+=`<text x="${px(6)-BW/2}" y="226" text-anchor="middle" font-size="22" fill="#d9b98a">↺</text>`;
+ for(let g=0;g<24;g++){
+  const {k,top}=slot(g),x=px(k),col=g%2?'#b9773a':'#6f8f7a';
+  s+=top?`<polygon points="${x+2},${TY} ${x+PW-2},${TY} ${x+PW/2},${TY+H}" fill="${col}"/>`
+        :`<polygon points="${x+2},${BY} ${x+PW-2},${BY} ${x+PW/2},${BY-H}" fill="${col}"/>`;
+ }
+ for(let g=0;g<24;g++){
+  const {k,top}=slot(g),cx=px(k)+PW/2,c=Math.abs(S.p[g]);
+  if(t[g]!==undefined)s+=`<circle cx="${cx}" cy="${top?TY+H-16:BY-H+16}" r="11" fill="#22c55e" opacity=".85"/>`;
+  const step=c>5?170/(c-1):2*R;
+  for(let j=0;j<c;j++){
+   const cy=top?TY+R+j*step:BY-R-j*step,w=S.p[g]>0,last=j==c-1;
+   const sel=S.sel===g&&last,can=src.has(g)&&last;
+   s+=`<circle cx="${cx}" cy="${cy}" r="${R-2}" fill="${w?'#f6f0e2':'#2b2b30'}" stroke="${sel?'#22c55e':can?'#e9b200':w?'#8a7a60':'#9a9aa8'}" stroke-width="${sel?4:can?3:2}"/>`;
+   if(last&&c>5)s+=`<text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="14" font-weight="700" fill="${w?'#222':'#eee'}">${c}</text>`;
+  }
+ }
+ const tray=(x,n,fill,st,hl)=>{s+=`<rect x="${x}" y="4" width="72" height="432" rx="6" fill="#a8743f" stroke="${hl?'#22c55e':'none'}" stroke-width="4"/>`;for(let j=0;j<15;j++){const cy=20+j*28;s+=j<n?`<circle cx="${x+36}" cy="${cy}" r="12" fill="${fill}" stroke="${st}" stroke-width="1.5"/>`:`<circle cx="${x+36}" cy="${cy}" r="11" fill="#6a4220"/>`}};
+ tray(720,S.off[1],'#f6f0e2','#8a7a60',t.off);tray(8,S.off[-1],'#2b2b30','#9a9aa8',false);
+ for(let g=0;g<24;g++){const {k,top}=slot(g);s+=`<rect data-k="${g}" x="${px(k)}" y="${top?4:220}" width="${PW}" height="216" fill="transparent"/>`}
+ s+=`<rect data-k="off" x="720" y="4" width="72" height="432" fill="transparent"/>`;
+ $('b').innerHTML=s;
+ const rl=S.roll||[],dbl=rl.length>0&&rl[0]==rl[1];
+ $('dice').innerHTML=rl.map((n,i)=>face(n,!S.rolled||(dbl?S.dice.length===0:!S.dice.includes(n)))).join('')+(dbl&&S.rolled?`<span class="x">×${S.dice.length}</span>`:'');
+ $('roll').disabled=!(S.turn==1&&!S.rolled&&!S.over);
+ $('info').textContent=`Пипсы: вы ${pips(S,1)} / комп. ${pips(S,-1)} · Снято: вы ${S.off[1]} / комп. ${S.off[-1]} · Счёт ${score[1]}:${score[-1]}`;
+}
+$('b').addEventListener('click',e=>{
+ const k=e.target.dataset&&e.target.dataset.k;
+ if(k===undefined)return;
+ click(k==='off'?k:Number(k));
+});
+$('roll').onclick=()=>{if(S.turn==1&&!S.busy)roll()};
+$('new').onclick=init;
+$('rs').onclick=()=>{score={1:0,'-1':0};saveScore();render()};
+addEventListener('pointerdown',A);
+$('snd').onclick=()=>{mute=!mute;$('snd').textContent=mute?'🔇':'🔊'};
+$('rot').onclick=()=>{const st=$('stage');rot=!(rot===null?st.clientWidth<st.clientHeight:rot);fit()};
+$('fs').onclick=()=>{try{document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen()}catch(e){}};
+new ResizeObserver(fit).observe($('stage'));
+fit();init();
+</script></body></html>
